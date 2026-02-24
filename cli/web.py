@@ -696,6 +696,40 @@ body {
   pointer-events: none;
 }
 .wrap { max-width:1160px; margin:22px auto; padding:0 14px 28px; position: relative; z-index:1; }
+.scan {
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255,255,255,0) 0px,
+    rgba(255,255,255,0) 3px,
+    rgba(95, 181, 255, .03) 4px
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+.ticker-wrap {
+  overflow: hidden;
+  border:1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(4, 20, 43, .65);
+  padding: 8px 0;
+  margin-bottom: 14px;
+}
+.ticker-track {
+  display: inline-flex;
+  gap: 26px;
+  white-space: nowrap;
+  padding-left: 18px;
+  animation: ticker-move 34s linear infinite;
+}
+.ticker-item { color:#b9d4ff; font-size:13px; }
+.ticker-up { color:#9ff7d3; }
+.ticker-down { color:#ffb5b5; }
+@keyframes ticker-move {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
 .card {
   background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.05));
   border:1px solid var(--line);
@@ -704,6 +738,22 @@ body {
   margin-bottom:14px;
   backdrop-filter: blur(10px);
   box-shadow: 0 20px 40px rgba(0,0,0,.25);
+  position: relative;
+  overflow: hidden;
+  animation: fade-up .5s ease both;
+}
+.card::after {
+  content:"";
+  position:absolute;
+  inset:-2px;
+  border-radius:16px;
+  pointer-events:none;
+  background: linear-gradient(120deg, rgba(41,211,255,.18), rgba(53,242,161,.10), transparent 35%);
+  mix-blend-mode: screen;
+}
+@keyframes fade-up {
+  from { opacity:0; transform: translateY(8px); }
+  to { opacity:1; transform: translateY(0); }
 }
 .hero { border-color: rgba(41,211,255,.45); }
 h1,h2,h3 { margin:0 0 10px; letter-spacing: .2px; }
@@ -717,6 +767,15 @@ a { color:var(--accent); text-underline-offset: 2px; }
 }
 .grid { display:grid; gap:12px; grid-template-columns:repeat(2,minmax(0,1fr)); }
 .grid3 { display:grid; gap:12px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+.kpi-grid { display:grid; gap:12px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-bottom: 14px; }
+.kpi-card {
+  border:1px solid var(--line);
+  border-radius:14px;
+  background: linear-gradient(145deg, rgba(9,29,54,.8), rgba(11,39,67,.6));
+  padding:12px;
+}
+.kpi-title { color:var(--muted); font-size:11px; letter-spacing:.6px; text-transform:uppercase; }
+.kpi-value { font-size:22px; font-weight:800; margin-top:4px; color:#dff4ff; }
 .kpi { font-size:14px; color:var(--text); margin:4px 0; }
 label { display:block; font-size:12px; font-weight:700; margin-bottom:6px; color:#bcd2f1; text-transform: uppercase; letter-spacing:.5px; }
 input, select {
@@ -744,7 +803,7 @@ pre {
 .error { border-color: rgba(255,138,138,.5); }
 .error * { color:#ffd1d1 !important; }
 @media (max-width: 900px) {
-  .grid, .grid3 { grid-template-columns:1fr; }
+  .grid, .grid3, .kpi-grid { grid-template-columns:1fr; }
 }
 </style>
 """
@@ -795,6 +854,30 @@ def _three_bg_script() -> str:
 """
 
 
+def _render_ticker_tape() -> str:
+    items = [
+        ("SPY", "+0.62%"),
+        ("QQQ", "+0.88%"),
+        ("DXY", "-0.14%"),
+        ("NVDA", "+1.72%"),
+        ("MSFT", "+0.56%"),
+        ("AAPL", "-0.31%"),
+        ("TSLA", "+2.09%"),
+        ("BTC", "+1.21%"),
+    ]
+    spans = []
+    for sym, chg in items:
+        cls = "ticker-up" if chg.startswith("+") else "ticker-down"
+        spans.append(f'<span class="ticker-item">{sym} <span class="{cls}">{chg}</span></span>')
+    content = "".join(spans)
+    return (
+        '<div class="ticker-wrap"><div class="ticker-track">'
+        + content
+        + content
+        + "</div></div>"
+    )
+
+
 def _render_landing(user: dict | None = None, error: str = "") -> str:
     suggestions = _daily_suggestions()
     paid = False
@@ -803,6 +886,8 @@ def _render_landing(user: dict | None = None, error: str = "") -> str:
         paid = bool(plan.get("is_paid"))
     cards = []
     for s in suggestions:
+        dec = (s["decision"] or "").upper()
+        dec_cls = "ticker-up" if dec == "BUY" else ("ticker-down" if dec == "SELL" else "")
         detail_html = (
             f'<div style="margin-top:8px;color:#0f5132;">Reason: {_escape(s["details"])}</div>'
             if paid
@@ -811,7 +896,7 @@ def _render_landing(user: dict | None = None, error: str = "") -> str:
         cards.append(
             f"""
             <div class="card">
-              <h3 style="margin:0 0 8px;">{_escape(s["symbol"])} · {_escape(s["decision"])}</h3>
+              <h3 style="margin:0 0 8px;">{_escape(s["symbol"])} · <span class="{dec_cls}">{_escape(s["decision"])}</span></h3>
               <div>{_escape(s["summary"])}</div>
               {detail_html}
             </div>
@@ -833,7 +918,9 @@ def _render_landing(user: dict | None = None, error: str = "") -> str:
 {_fintech_style()}
 </head><body>
 <canvas id="bg3d" class="bg-canvas"></canvas>
+<div class="scan"></div>
 <main class="wrap">
+{_render_ticker_tape()}
 <section class="card hero">
   <span class="pill">AI Multi-Agent · Financial Intelligence</span>
   <h1 style="margin-top:10px;">TradingAgents FinTech Advisory</h1>
@@ -866,7 +953,7 @@ def _render_login(error: str = "") -> str:
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
 {_fintech_style()}</head>
-<body><main class="wrap"><section class="card" style="max-width:520px;margin:40px auto;">
+<body><div class="scan"></div><main class="wrap">{_render_ticker_tape()}<section class="card" style="max-width:520px;margin:40px auto;">
 <h2>Login</h2>{err}
 <form method="post" action="/login">
 <p><label>Username <input name="username" required></label></p>
@@ -881,7 +968,7 @@ def _render_register(error: str = "") -> str:
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
 {_fintech_style()}</head>
-<body><main class="wrap"><section class="card" style="max-width:520px;margin:40px auto;">
+<body><div class="scan"></div><main class="wrap">{_render_ticker_tape()}<section class="card" style="max-width:520px;margin:40px auto;">
 <h2>Register</h2>{err}
 <form method="post" action="/register">
 <p><label>Username <input name="username" required></label></p>
@@ -917,7 +1004,7 @@ def _render_pricing(user: dict | None = None, error: str = "") -> str:
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
 {_fintech_style()}</head>
-<body><main class="wrap"><section class="card hero"><h2>Pricing</h2><p><a href="/">Home</a> | <a href="/task-center">Task Center</a></p></section>{err}<section class="grid3">{''.join(cards)}</section></main></body></html>"""
+<body><div class="scan"></div><main class="wrap">{_render_ticker_tape()}<section class="card hero"><h2>Pricing</h2><p><a href="/">Home</a> | <a href="/task-center">Task Center</a></p></section>{err}<section class="grid3">{''.join(cards)}</section></main></body></html>"""
 
 
 def _render_dashboard(user: dict, error: str = "") -> str:
@@ -987,8 +1074,16 @@ def _render_dashboard(user: dict, error: str = "") -> str:
   </head>
   <body>
     <canvas id="bg3d" class="bg-canvas"></canvas>
+    <div class="scan"></div>
     <main class="wrap">
+      {_render_ticker_tape()}
       <h1>TradingAgents Task Center</h1>
+      <section class="kpi-grid">
+        <div class="kpi-card"><div class="kpi-title">Plan</div><div class="kpi-value">{_escape(stats['plan']['name'])}</div></div>
+        <div class="kpi-card"><div class="kpi-title">Queries Left</div><div class="kpi-value">{stats['remaining_queries']}</div></div>
+        <div class="kpi-card"><div class="kpi-title">Tickers Left</div><div class="kpi-value">{stats['remaining_tickers']}</div></div>
+        <div class="kpi-card"><div class="kpi-title">Today Usage</div><div class="kpi-value">{stats['used_queries']}</div></div>
+      </section>
       <section class="card">
         <p class="kpi"><strong>User:</strong> {_escape(user['username'])}</p>
         <p class="kpi"><strong>Plan:</strong> {_escape(stats['plan']['name'])} ({stats['plan']['plan_id']})</p>
@@ -1109,7 +1204,9 @@ def _render_task_page(task_id: str) -> str:
   </head>
   <body>
     <canvas id="bg3d" class="bg-canvas"></canvas>
+    <div class="scan"></div>
     <main class="wrap">
+      {_render_ticker_tape()}
       <div class="card">
         <a href="/task-center">Back to Tasks</a>
         <h2>Task {_escape(task_id)}</h2>
