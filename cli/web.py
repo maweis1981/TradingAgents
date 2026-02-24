@@ -660,6 +660,141 @@ def _spawn_task(payload: dict, user_id: int) -> str:
     return task_id
 
 
+def _fintech_style() -> str:
+    return """
+<style>
+:root {
+  --bg0:#050b16;
+  --bg1:#0a1830;
+  --bg2:#0f2747;
+  --glass:rgba(255,255,255,.08);
+  --line:rgba(255,255,255,.16);
+  --text:#d9e8ff;
+  --muted:#9bb6dc;
+  --accent:#29d3ff;
+  --accent2:#35f2a1;
+  --warn:#ffc66b;
+  --danger:#ff8a8a;
+}
+* { box-sizing:border-box; }
+html,body { margin:0; padding:0; }
+body {
+  color:var(--text);
+  background:
+    radial-gradient(1200px 800px at 10% -10%, #10335f 0%, transparent 45%),
+    radial-gradient(900px 700px at 100% 0%, #113f59 0%, transparent 40%),
+    linear-gradient(135deg, var(--bg0), var(--bg1) 45%, var(--bg2));
+  font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+}
+.bg-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  opacity: .45;
+  pointer-events: none;
+}
+.wrap { max-width:1160px; margin:22px auto; padding:0 14px 28px; position: relative; z-index:1; }
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.05));
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:16px;
+  margin-bottom:14px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 20px 40px rgba(0,0,0,.25);
+}
+.hero { border-color: rgba(41,211,255,.45); }
+h1,h2,h3 { margin:0 0 10px; letter-spacing: .2px; }
+p { color:var(--muted); line-height:1.55; margin:0 0 8px; }
+a { color:var(--accent); text-underline-offset: 2px; }
+.nav { display:flex; gap:12px; flex-wrap: wrap; }
+.pill {
+  display:inline-block; padding:6px 10px; border-radius:999px;
+  border:1px solid var(--line); background:rgba(255,255,255,.06);
+  color:var(--text); font-size:12px; font-weight:600;
+}
+.grid { display:grid; gap:12px; grid-template-columns:repeat(2,minmax(0,1fr)); }
+.grid3 { display:grid; gap:12px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+.kpi { font-size:14px; color:var(--text); margin:4px 0; }
+label { display:block; font-size:12px; font-weight:700; margin-bottom:6px; color:#bcd2f1; text-transform: uppercase; letter-spacing:.5px; }
+input, select {
+  width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 12px;
+  font-size:14px; background:rgba(8,18,35,.55); color:var(--text);
+}
+button {
+  border:0; border-radius:10px; background: linear-gradient(120deg, var(--accent), #4dc5ff);
+  color:#04263f; padding:10px 14px; font-weight:800; cursor:pointer;
+}
+.checks { display:flex; gap:12px; flex-wrap: wrap; }
+.checks label { font-weight:600; text-transform:none; letter-spacing:0; margin:0; }
+.table-wrap { overflow:auto; }
+table { border-collapse: collapse; width:100%; min-width:860px; }
+th, td { border-bottom:1px solid rgba(255,255,255,.12); text-align:left; padding:10px 8px; font-size:13px; color:var(--text); }
+.status { padding:3px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+.status-completed { background:rgba(53,242,161,.2); color:#9ff7d3; }
+.status-running { background:rgba(255,198,107,.2); color:#ffd58d; }
+.status-queued { background:rgba(255,255,255,.15); color:#d5e5ff; }
+.status-failed { background:rgba(255,138,138,.2); color:#ffb5b5; }
+pre {
+  background:#040d20; color:#c8dcff; border-radius:10px; border:1px solid rgba(255,255,255,.12);
+  padding:12px; min-height:220px; white-space:pre-wrap; word-break:break-word; overflow:auto;
+}
+.error { border-color: rgba(255,138,138,.5); }
+.error * { color:#ffd1d1 !important; }
+@media (max-width: 900px) {
+  .grid, .grid3 { grid-template-columns:1fr; }
+}
+</style>
+"""
+
+
+def _three_bg_script() -> str:
+    return """
+<script src="https://unpkg.com/three@0.165.0/build/three.min.js"></script>
+<script>
+(() => {
+  const canvas = document.getElementById("bg3d");
+  if (!canvas || !window.THREE) return;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, .1, 1000);
+  camera.position.z = 3.2;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+
+  const geometry = new THREE.IcosahedronGeometry(1.1, 20);
+  const material = new THREE.MeshBasicMaterial({ color:0x2ad3ff, wireframe:true, transparent:true, opacity:.22 });
+  const mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
+
+  const pointsGeom = new THREE.BufferGeometry();
+  const count = 1800;
+  const arr = new Float32Array(count * 3);
+  for (let i = 0; i < count * 3; i++) arr[i] = (Math.random() - .5) * 18;
+  pointsGeom.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+  const points = new THREE.Points(pointsGeom, new THREE.PointsMaterial({ color:0x35f2a1, size:.01, transparent:true, opacity:.35 }));
+  scene.add(points);
+
+  const tick = () => {
+    mesh.rotation.x += .0014;
+    mesh.rotation.y += .0021;
+    points.rotation.y -= .0007;
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  };
+  tick();
+  addEventListener("resize", () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+})();
+</script>
+"""
+
+
 def _render_landing(user: dict | None = None, error: str = "") -> str:
     suggestions = _daily_suggestions()
     paid = False
@@ -692,50 +827,67 @@ def _render_landing(user: dict | None = None, error: str = "") -> str:
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>TradingAgents Service</title>
-<style>
-body{{margin:0;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(120deg,#eef4ff,#f5fbff,#edf7ef);color:#132033;}}
-.wrap{{max-width:1120px;margin:24px auto;padding:0 14px 30px;}}
-.card{{background:#fff;border:1px solid #ccd5df;border-radius:12px;padding:16px;margin-bottom:14px;}}
-.grid{{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr));}}
-.error{{border-color:#e9b2b2;background:#fff5f5;}}
-@media (max-width:900px){{.grid{{grid-template-columns:1fr;}}}}
-</style></head><body><main class="wrap">
-<section class="card">
-<h1 style="margin:0 0 8px;">TradingAgents Advisory Platform</h1>
-<p style="margin:0 0 8px;">We provide AI-driven multi-agent stock consultation, trading recommendations, and report generation.</p>
-<p style="margin:0;">{auth_html}</p>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
+{_fintech_style()}
+</head><body>
+<canvas id="bg3d" class="bg-canvas"></canvas>
+<main class="wrap">
+<section class="card hero">
+  <span class="pill">AI Multi-Agent · Financial Intelligence</span>
+  <h1 style="margin-top:10px;">TradingAgents FinTech Advisory</h1>
+  <p>Institution-style multi-agent stock analysis, real-time task execution, and actionable trading decisions in one platform.</p>
+  <div class="nav">{auth_html}</div>
 </section>
-<section class="card">
-<h2 style="margin-top:0;">Business</h2>
-<p>Users can log in and subscribe to plans with different ticker capacity and daily query limits, then use Task Center to generate stock consultation reports.</p>
-<p>Daily stock suggestions are public. Full reasoning and full reports are available for paid subscribers.</p>
+<section class="grid">
+  <div class="card">
+    <h2>What You Get</h2>
+    <p>Use Task Center for stock consultation and full report generation with live progress.</p>
+    <p>Daily public trade ideas are available to all users.</p>
+  </div>
+  <div class="card">
+    <h2>Subscription Model</h2>
+    <p>Plans define ticker capacity and daily query counts.</p>
+    <p>Paid users can unlock full rationale behind daily recommendations.</p>
+  </div>
 </section>
 {error_block}
 <section><h2>Today's Suggestions</h2></section>
-{''.join(cards) if cards else '<div class="card">No suggestions today.</div>'}
-</main></body></html>"""
+<section class="grid">{''.join(cards) if cards else '<div class="card">No suggestions today.</div>'}</section>
+</main>
+{_three_bg_script()}
+</body></html>"""
 
 
 def _render_login(error: str = "") -> str:
     err = f'<p style="color:#8a1c1c;">{_escape(error)}</p>' if error else ""
-    return f"""<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Login</title></head>
-<body style="font-family:ui-sans-serif;padding:24px;"><h2>Login</h2>{err}
+    return f"""<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Login</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
+{_fintech_style()}</head>
+<body><main class="wrap"><section class="card" style="max-width:520px;margin:40px auto;">
+<h2>Login</h2>{err}
 <form method="post" action="/login">
 <p><label>Username <input name="username" required></label></p>
 <p><label>Password <input type="password" name="password" required></label></p>
-<p><button type="submit">Login</button></p>
-</form><p><a href="/register">Register</a> | <a href="/">Home</a></p></body></html>"""
+<p><button type="submit">Enter Task Center</button></p>
+</form><p><a href="/register">Register</a> | <a href="/">Home</a></p></section></main></body></html>"""
 
 
 def _render_register(error: str = "") -> str:
     err = f'<p style="color:#8a1c1c;">{_escape(error)}</p>' if error else ""
-    return f"""<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Register</title></head>
-<body style="font-family:ui-sans-serif;padding:24px;"><h2>Register</h2>{err}
+    return f"""<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Register</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
+{_fintech_style()}</head>
+<body><main class="wrap"><section class="card" style="max-width:520px;margin:40px auto;">
+<h2>Register</h2>{err}
 <form method="post" action="/register">
 <p><label>Username <input name="username" required></label></p>
 <p><label>Password <input type="password" name="password" required></label></p>
 <p><button type="submit">Create Account</button></p>
-</form><p><a href="/login">Login</a> | <a href="/">Home</a></p></body></html>"""
+</form><p><a href="/login">Login</a> | <a href="/">Home</a></p></section></main></body></html>"""
 
 
 def _render_pricing(user: dict | None = None, error: str = "") -> str:
@@ -761,8 +913,11 @@ def _render_pricing(user: dict | None = None, error: str = "") -> str:
         )
     err = f"<div class='card' style='border-color:#e9b2b2;color:#8a1c1c;'>{_escape(error)}</div>" if error else ""
     return f"""<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Pricing</title><style>.card{{border:1px solid #ccd5df;border-radius:10px;padding:12px;margin:12px 0;}}</style></head>
-<body style="font-family:ui-sans-serif;padding:24px;"><h2>Pricing</h2><p><a href="/">Home</a> | <a href="/task-center">Task Center</a></p>{err}{''.join(cards)}</body></html>"""
+<title>Pricing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
+{_fintech_style()}</head>
+<body><main class="wrap"><section class="card hero"><h2>Pricing</h2><p><a href="/">Home</a> | <a href="/task-center">Task Center</a></p></section>{err}<section class="grid3">{''.join(cards)}</section></main></body></html>"""
 
 
 def _render_dashboard(user: dict, error: str = "") -> str:
@@ -826,40 +981,19 @@ def _render_dashboard(user: dict, error: str = "") -> str:
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta http-equiv="refresh" content="20" />
     <title>TradingAgents Task Center</title>
-    <style>
-      :root {{ --fg:#0f1d2e; --line:#ccd5df; --card:#fff; --primary:#0b6bcb; --bg:#eef4f8; --ok:#0f766e; --run:#7c5b00; --fail:#8a1c1c; }}
-      * {{ box-sizing:border-box; }}
-      body {{ margin:0; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--fg); background: radial-gradient(circle at 0% 0%, #e5f0ff, #f7fbff 45%, #f0f7f1); }}
-      .wrap {{ max-width:1120px; margin:24px auto; padding:0 14px 24px; }}
-      h1 {{ margin:0 0 14px; }}
-      .card {{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; box-shadow: 0 8px 20px rgba(14, 24, 34, 0.06); }}
-      .grid {{ display:grid; gap:12px; grid-template-columns: repeat(3,minmax(0,1fr)); }}
-      label {{ display:block; font-size:13px; font-weight:700; margin-bottom:5px; }}
-      input, select {{ width:100%; border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:14px; background:#fff; }}
-      .checks {{ display:flex; gap:12px; flex-wrap: wrap; }}
-      .checks label {{ font-weight:600; margin:0; }}
-      button {{ border:0; background:var(--primary); color:#fff; border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer; }}
-      .table-wrap {{ overflow:auto; }}
-      table {{ border-collapse: collapse; width:100%; min-width:900px; }}
-      th, td {{ border-bottom:1px solid #e8edf2; text-align:left; padding:10px 8px; font-size:13px; }}
-      .status {{ padding:3px 8px; border-radius:999px; font-weight:700; font-size:12px; }}
-      .status-completed {{ background:#d5f5ef; color:var(--ok); }}
-      .status-running {{ background:#fff2c7; color:var(--run); }}
-      .status-queued {{ background:#e9eef4; color:#334155; }}
-      .status-failed {{ background:#fde2e2; color:var(--fail); }}
-      .error {{ border-color:#e9b2b2; }}
-      .error h2 {{ color:var(--fail); }}
-      @media (max-width: 900px) {{ .grid {{ grid-template-columns:1fr; }} }}
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
+    {_fintech_style()}
   </head>
   <body>
+    <canvas id="bg3d" class="bg-canvas"></canvas>
     <main class="wrap">
       <h1>TradingAgents Task Center</h1>
       <section class="card">
-        <p style="margin:0 0 6px;"><strong>User:</strong> {_escape(user['username'])}</p>
-        <p style="margin:0 0 6px;"><strong>Plan:</strong> {_escape(stats['plan']['name'])} ({stats['plan']['plan_id']})</p>
-        <p style="margin:0 0 6px;"><strong>Daily Queries:</strong> {stats['used_queries']} / {stats['plan']['daily_query_limit']}</p>
-        <p style="margin:0 0 6px;"><strong>Subscribed Tickers:</strong> {stats['ticker_count']} / {stats['plan']['ticker_limit']}</p>
+        <p class="kpi"><strong>User:</strong> {_escape(user['username'])}</p>
+        <p class="kpi"><strong>Plan:</strong> {_escape(stats['plan']['name'])} ({stats['plan']['plan_id']})</p>
+        <p class="kpi"><strong>Daily Queries:</strong> {stats['used_queries']} / {stats['plan']['daily_query_limit']}</p>
+        <p class="kpi"><strong>Subscribed Tickers:</strong> {stats['ticker_count']} / {stats['plan']['ticker_limit']}</p>
         <p style="margin:0;"><a href="/">Home</a> | <a href="/pricing">Pricing</a> | <a href="/logout">Logout</a></p>
       </section>
       <section class="card">
@@ -916,6 +1050,7 @@ def _render_dashboard(user: dict, error: str = "") -> str:
       {error_block}
       {task_table}
     </main>
+    {_three_bg_script()}
   </body>
 </html>"""
 
@@ -968,21 +1103,12 @@ def _render_task_page(task_id: str) -> str:
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Task { _escape(task_id) }</title>
-    <style>
-      :root {{ --fg:#0f1d2e; --line:#ccd5df; --card:#fff; --bg:#eef4f8; --primary:#0b6bcb; }}
-      * {{ box-sizing:border-box; }}
-      body {{ margin:0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background:linear-gradient(120deg,#eef4ff,#f5fbff,#edf7ef); color:var(--fg); }}
-      .wrap {{ max-width:1120px; margin:20px auto; padding:0 14px 20px; }}
-      .card {{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }}
-      pre {{ background:#0b1220; color:#d2e4ff; border-radius:10px; padding:12px; min-height:280px; white-space:pre-wrap; word-break:break-word; overflow:auto; }}
-      .meta p {{ margin:5px 0; font-size:14px; }}
-      .table-wrap {{ overflow:auto; }}
-      table {{ border-collapse: collapse; width:100%; min-width:680px; }}
-      th, td {{ border-bottom:1px solid #e8edf2; text-align:left; padding:8px 6px; font-size:13px; }}
-      a {{ color:#0b6bcb; }}
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
+    {_fintech_style()}
   </head>
   <body>
+    <canvas id="bg3d" class="bg-canvas"></canvas>
     <main class="wrap">
       <div class="card">
         <a href="/task-center">Back to Tasks</a>
@@ -1063,6 +1189,7 @@ def _render_task_page(task_id: str) -> str:
 
       poll();
     </script>
+    {_three_bg_script()}
   </body>
 </html>"""
 
