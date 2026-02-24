@@ -138,6 +138,21 @@ cp .env.example .env
 
 ### CLI Usage
 
+
+### Web UI Usage
+
+You can start a simple local web interface:
+
+```bash
+python -m cli.web
+```
+
+Then open `http://127.0.0.1:8088` in your browser, fill in ticker/date/model config, and run the analysis.
+
+Optional env vars:
+- `TRADINGAGENTS_WEB_HOST` (default: `127.0.0.1`)
+- `TRADINGAGENTS_WEB_PORT` (default: `8088`)
+
 You can also try out the CLI directly by running:
 ```bash
 python -m cli.main
