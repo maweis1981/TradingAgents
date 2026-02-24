@@ -3,8 +3,10 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,6 +31,8 @@ TASKS_DIR = Path(
     )
 ).resolve()
 TASKS_DIR.mkdir(parents=True, exist_ok=True)
+TASK_CONTROL_LOCK = threading.Lock()
+RECONCILE_INTERVAL_SECONDS = int(os.getenv("TRADINGAGENTS_WEB_RECONCILE_INTERVAL", "3"))
 
 PROVIDERS = ["openai", "google", "anthropic", "xai", "openrouter", "ollama"]
 DEFAULT_ANALYSTS = ["market", "social", "news", "fundamentals"]
@@ -146,6 +150,15 @@ def _read_events(task_dir: Path, offset: int) -> tuple[list[dict], int]:
     return events, next_offset
 
 
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except Exception:
+        return None
+
+
 def _is_pid_alive(pid: int | None) -> bool:
     if not pid:
         return False
@@ -154,6 +167,125 @@ def _is_pid_alive(pid: int | None) -> bool:
         return True
     except Exception:
         return False
+
+
+def _max_attempts(task: dict) -> int:
+    max_retries = int(task.get("max_retries", 2))
+    if max_retries < 0:
+        max_retries = 0
+    return 1 + max_retries
+
+
+def _retry_delay_seconds(task: dict) -> int:
+    delay = int(task.get("retry_delay_seconds", 15))
+    return max(delay, 0)
+
+
+def _launch_worker(task_dir: Path, attempt: int) -> int:
+    stdout_file = (task_dir / "worker.stdout.log").open("a", encoding="utf-8")
+    stderr_file = (task_dir / "worker.stderr.log").open("a", encoding="utf-8")
+    cmd = [
+        sys.executable,
+        "-m",
+        "cli.web_worker",
+        "--task-dir",
+        str(task_dir),
+    ]
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(Path(__file__).resolve().parents[1]),
+        stdout=stdout_file,
+        stderr=stderr_file,
+        start_new_session=True,
+    )
+    stdout_file.close()
+    stderr_file.close()
+    _update_status(task_dir, status="queued", pid=proc.pid, attempt=attempt)
+    _append_event(
+        task_dir,
+        "worker_started",
+        "Background worker started",
+        {"pid": proc.pid, "attempt": attempt},
+    )
+    return proc.pid
+
+
+def _schedule_retry_or_fail(task_dir: Path, task: dict, status: dict, reason: str) -> dict:
+    attempt = int(status.get("attempt") or 0)
+    max_attempts = _max_attempts(task)
+    if attempt < max_attempts:
+        delay_seconds = _retry_delay_seconds(task)
+        next_retry_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+        ).isoformat()
+        updated = _update_status(
+            task_dir,
+            status="queued",
+            pid=None,
+            next_retry_at=next_retry_at,
+            last_error=reason,
+        )
+        _append_event(
+            task_dir,
+            "retry_scheduled",
+            f"Retry scheduled: attempt {attempt + 1}/{max_attempts}",
+            {"reason": reason, "next_retry_at": next_retry_at, "retry_delay_seconds": delay_seconds},
+        )
+        return updated
+
+    updated = _update_status(task_dir, status="failed", pid=None, next_retry_at=None, last_error=reason)
+    _append_event(task_dir, "error", reason)
+    return updated
+
+
+def _reconcile_task(task_dir: Path) -> dict:
+    task = _read_json(task_dir / "task.json", default={})
+    status = _read_json(task_dir / "status.json", default={})
+    if not task or not status:
+        return status
+
+    state = status.get("status", "queued")
+    pid = status.get("pid")
+    alive = _is_pid_alive(pid) if pid else False
+
+    if state == "completed":
+        return status
+
+    if state == "failed":
+        return status
+
+    if state == "running" and not alive:
+        return _schedule_retry_or_fail(task_dir, task, status, "Worker exited unexpectedly while running")
+
+    if state == "queued":
+        next_retry = _parse_iso(status.get("next_retry_at"))
+        now = datetime.now(timezone.utc)
+        due = (next_retry is None) or (next_retry <= now)
+        if alive:
+            return status
+        if due:
+            attempt = int(status.get("attempt") or 0) + 1
+            _launch_worker(task_dir, attempt)
+            return _read_json(task_dir / "status.json", default={})
+
+    return status
+
+
+def _reconcile_all_tasks_once() -> None:
+    with TASK_CONTROL_LOCK:
+        for task_dir in sorted(TASKS_DIR.glob("*")):
+            if not task_dir.is_dir():
+                continue
+            _reconcile_task(task_dir)
+
+
+def _reconcile_loop() -> None:
+    while True:
+        try:
+            _reconcile_all_tasks_once()
+        except Exception:
+            pass
+        time.sleep(RECONCILE_INTERVAL_SECONDS)
 
 
 def _validate_form(form: dict) -> dict:
@@ -171,6 +303,12 @@ def _validate_form(form: dict) -> dict:
     rounds = int(form.get("rounds") or "1")
     if rounds < 1 or rounds > 6:
         raise ValueError("Debate rounds must be between 1 and 6")
+    max_retries = int(form.get("max_retries") or "2")
+    retry_delay_seconds = int(form.get("retry_delay_seconds") or "15")
+    if max_retries < 0 or max_retries > 10:
+        raise ValueError("max_retries must be between 0 and 10")
+    if retry_delay_seconds < 0 or retry_delay_seconds > 3600:
+        raise ValueError("retry_delay_seconds must be between 0 and 3600")
 
     deep_model = (form.get("deep_model") or DEFAULT_CONFIG["deep_think_llm"]).strip()
     quick_model = (form.get("quick_model") or DEFAULT_CONFIG["quick_think_llm"]).strip()
@@ -192,6 +330,8 @@ def _validate_form(form: dict) -> dict:
         "deep_model": deep_model,
         "quick_model": quick_model,
         "analysts": analysts,
+        "max_retries": max_retries,
+        "retry_delay_seconds": retry_delay_seconds,
     }
 
 
@@ -218,30 +358,7 @@ def _spawn_task(payload: dict) -> str:
     )
     _append_event(task_dir, "created", "Task created", {"task_id": task_id, **payload})
 
-    stdout_file = (task_dir / "worker.stdout.log").open("a", encoding="utf-8")
-    stderr_file = (task_dir / "worker.stderr.log").open("a", encoding="utf-8")
-
-    cmd = [
-        sys.executable,
-        "-m",
-        "cli.web_worker",
-        "--task-dir",
-        str(task_dir),
-    ]
-
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(Path(__file__).resolve().parents[1]),
-        stdout=stdout_file,
-        stderr=stderr_file,
-        start_new_session=True,
-    )
-
-    _update_status(task_dir, status="queued", pid=proc.pid)
-    _append_event(task_dir, "worker_started", "Background worker started", {"pid": proc.pid})
-
-    stdout_file.close()
-    stderr_file.close()
+    _launch_worker(task_dir, attempt=1)
     return task_id
 
 
@@ -362,6 +479,14 @@ def _render_dashboard(error: str = "") -> str:
               <label for="quick_model">Quick Think Model</label>
               <input id="quick_model" name="quick_model" value="{_escape(DEFAULT_CONFIG['quick_think_llm'])}" required />
             </div>
+            <div>
+              <label for="max_retries">Max Retries</label>
+              <input id="max_retries" name="max_retries" type="number" min="0" max="10" value="2" />
+            </div>
+            <div>
+              <label for="retry_delay_seconds">Retry Delay (sec)</label>
+              <input id="retry_delay_seconds" name="retry_delay_seconds" type="number" min="0" max="3600" value="15" />
+            </div>
           </div>
           <div style="margin-top:10px;">
             <label>Analysts</label>
@@ -424,6 +549,8 @@ def _render_task_page(task_id: str) -> str:
           <p><strong>Trade Date:</strong> {_escape(task.get('trade_date', ''))}</p>
           <p><strong>Status:</strong> <span id="status">{_escape(status.get('status', 'unknown'))}</span></p>
           <p><strong>PID:</strong> <span id="pid">{_escape(str(status.get('pid', '')))}</span></p>
+          <p><strong>Attempt:</strong> <span id="attempt">{_escape(str(status.get('attempt', '')))}</span></p>
+          <p><strong>Last Error:</strong> <span id="last_error">{_escape(str(status.get('last_error', '')))}</span></p>
         </div>
       </div>
       <section class="card">
@@ -471,6 +598,8 @@ def _render_task_page(task_id: str) -> str:
             const st = await stResp.json();
             document.getElementById("status").textContent = st.status || "unknown";
             document.getElementById("pid").textContent = st.pid ?? "";
+            document.getElementById("attempt").textContent = st.attempt ?? "";
+            document.getElementById("last_error").textContent = st.last_error ?? "";
             if (st.status === "completed" || st.status === "failed") {{
               // keep polling slowly for final events
               setTimeout(poll, 5000);
@@ -541,10 +670,8 @@ class TradingAgentsWebHandler(BaseHTTPRequestHandler):
                 return
 
             if len(segments) == 3:
-                status = _read_json(paths["status"], default={})
-                if status.get("status") in {"queued", "running"} and not _is_pid_alive(status.get("pid")):
-                    status = _update_status(paths["dir"], status="failed")
-                    _append_event(paths["dir"], "error", "Worker process is not alive")
+                with TASK_CONTROL_LOCK:
+                    status = _reconcile_task(paths["dir"])
                 result = _read_json(paths["result"], default={})
                 self._send_json({**status, "result": result, "task_id": task_id})
                 return
@@ -573,16 +700,20 @@ class TradingAgentsWebHandler(BaseHTTPRequestHandler):
 
         try:
             payload = _validate_form(form)
-            task_id = _spawn_task(payload)
+            with TASK_CONTROL_LOCK:
+                task_id = _spawn_task(payload)
             self._redirect(f"/task?id={task_id}")
         except Exception as exc:
             self._send_html(_render_dashboard(error=str(exc)), status=HTTPStatus.BAD_REQUEST)
 
 
 def main() -> None:
+    t = threading.Thread(target=_reconcile_loop, daemon=True)
+    t.start()
     server = ThreadingHTTPServer((HOST, PORT), TradingAgentsWebHandler)
     print(f"TradingAgents Web UI running at http://{HOST}:{PORT}")
     print(f"Task store: {TASKS_DIR}")
+    print(f"Reconcile interval: {RECONCILE_INTERVAL_SECONDS}s")
     server.serve_forever()
 
 

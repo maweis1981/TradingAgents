@@ -156,6 +156,12 @@ Optional env vars:
 - `TRADINGAGENTS_WEB_HOST` (default: `127.0.0.1`)
 - `TRADINGAGENTS_WEB_PORT` (default: `8088`)
 - `TRADINGAGENTS_WEB_TASKS_DIR` (default: `./results/web_tasks`)
+- `TRADINGAGENTS_WEB_RECONCILE_INTERVAL` (default: `3`, seconds)
+
+Failover behavior:
+- Each task runs in an isolated worker process.
+- If a worker fails, the task is retried automatically using task-level policy (`max_retries`, `retry_delay_seconds`).
+- If browser/UI restarts, pending tasks are reconciled from disk and resumed by the scheduler loop.
 
 You can also try out the CLI directly by running:
 ```bash

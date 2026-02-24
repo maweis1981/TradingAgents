@@ -1,7 +1,7 @@
 import argparse
 import json
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 try:
@@ -27,6 +27,15 @@ REPORT_FIELDS = [
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except Exception:
+        return None
 
 
 def read_json(path: Path, default: dict | None = None) -> dict:
@@ -87,13 +96,16 @@ def run_task(task_dir: Path) -> None:
 
     analysts = task.get("analysts") or ["market", "social", "news", "fundamentals"]
 
+    status = read_json(task_dir / "status.json", default={})
+    attempt = int(status.get("attempt") or 1)
+
     append_event(
         task_dir,
         "start",
-        f"Starting analysis: ticker={ticker}, date={trade_date}, provider={task['provider']}",
-        {"analysts": analysts},
+        f"Starting analysis: ticker={ticker}, date={trade_date}, provider={task['provider']}, attempt={attempt}",
+        {"analysts": analysts, "attempt": attempt},
     )
-    update_status(task_dir, status="running")
+    update_status(task_dir, status="running", attempt=attempt)
 
     ta = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
     init_state = ta.propagator.create_initial_state(ticker, trade_date)
@@ -139,7 +151,7 @@ def run_task(task_dir: Path) -> None:
 
     write_json(task_dir / "result.json", result)
     append_event(task_dir, "completed", f"Task completed with decision: {decision}")
-    update_status(task_dir, status="completed")
+    update_status(task_dir, status="completed", pid=None, next_retry_at=None, last_error=None)
 
 
 def main() -> None:
@@ -155,7 +167,38 @@ def main() -> None:
     except Exception:
         err = traceback.format_exc()
         append_event(task_dir, "error", "Task failed", {"traceback": err})
-        update_status(task_dir, status="failed")
+        task = read_json(task_dir / "task.json", default={})
+        status = read_json(task_dir / "status.json", default={})
+        attempt = int(status.get("attempt") or 1)
+        max_retries = int(task.get("max_retries", 2))
+        retry_delay_seconds = int(task.get("retry_delay_seconds", 15))
+        max_attempts = 1 + max_retries
+
+        if attempt < max_attempts:
+            next_retry_at = now_iso() if retry_delay_seconds <= 0 else (
+                datetime.now(timezone.utc) + timedelta(seconds=retry_delay_seconds)
+            ).isoformat()
+            update_status(
+                task_dir,
+                status="queued",
+                pid=None,
+                last_error=err.splitlines()[-1] if err else "unknown error",
+                next_retry_at=next_retry_at,
+            )
+            append_event(
+                task_dir,
+                "retry_scheduled",
+                f"Retry scheduled: attempt {attempt + 1}/{max_attempts}",
+                {"next_retry_at": next_retry_at, "retry_delay_seconds": retry_delay_seconds},
+            )
+        else:
+            update_status(
+                task_dir,
+                status="failed",
+                pid=None,
+                last_error=err.splitlines()[-1] if err else "unknown error",
+                next_retry_at=None,
+            )
 
 
 if __name__ == "__main__":
