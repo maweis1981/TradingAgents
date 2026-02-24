@@ -531,9 +531,10 @@ def _render_task_page(task_id: str) -> str:
             if not files:
                 continue
             for rel in files:
-                rel_q = quote(rel)
-                open_url = f"/api/tasks/{quote(task_id)}/artifact?path={rel_q}"
-                download_url = f"/api/tasks/{quote(task_id)}/artifact?path={rel_q}&download=1"
+                rel_q = quote(rel, safe="")
+                task_q = quote(task_id, safe="")
+                open_url = f"/api/tasks/{task_q}/artifact?path={rel_q}"
+                download_url = f"/api/tasks/{task_q}/artifact?path={rel_q}&download=1"
                 artifact_rows.append(
                     f"<tr><td>{_escape(group)}</td><td>{_escape(rel)}</td>"
                     f"<td><a href=\"{_escape(open_url)}\" target=\"_blank\">Open</a> | "
@@ -684,7 +685,10 @@ class TradingAgentsWebHandler(BaseHTTPRequestHandler):
 
     def _send_file(self, file_path: Path, download: bool = False) -> None:
         if not file_path.exists() or not file_path.is_file():
-            self._send_html("<h1>File Not Found</h1>", status=HTTPStatus.NOT_FOUND)
+            self._send_json(
+                {"error": "file not found", "path": str(file_path)},
+                status=HTTPStatus.NOT_FOUND,
+            )
             return
         data = file_path.read_bytes()
         content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
@@ -699,6 +703,27 @@ class TradingAgentsWebHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
+
+        if path == "/artifact":
+            q = parse_qs(parsed.query)
+            task_id = (q.get("task_id") or [""])[0]
+            rel_path = (q.get("path") or [""])[0]
+            download = (q.get("download") or ["0"])[0] == "1"
+            if not task_id or not rel_path:
+                self._send_json({"error": "task_id and path are required"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            paths = _task_paths(task_id)
+            if not paths["dir"].exists():
+                self._send_json({"error": "task not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+            candidate = (paths["dir"] / rel_path).resolve()
+            try:
+                candidate.relative_to(paths["dir"].resolve())
+            except Exception:
+                self._send_json({"error": "invalid path"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._send_file(candidate, download=download)
+            return
 
         if path == "/":
             self._send_html(_render_dashboard())
@@ -742,7 +767,7 @@ class TradingAgentsWebHandler(BaseHTTPRequestHandler):
                 self._send_json({"task_id": task_id, "events": events, "next_offset": next_offset})
                 return
 
-            if len(segments) == 4 and segments[3] == "artifact":
+            if len(segments) >= 4 and segments[3] == "artifact":
                 q = parse_qs(parsed.query)
                 rel_path = (q.get("path") or [""])[0]
                 download = (q.get("download") or ["0"])[0] == "1"
