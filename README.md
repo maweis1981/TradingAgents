@@ -148,6 +148,9 @@ python -m cli.web
 ```
 
 Then open `http://127.0.0.1:8088` in your browser:
+- Visit homepage to view service introduction and daily stock suggestions.
+- Register/login to access Task Center.
+- Subscribe to a plan to increase ticker capacity and daily query limits.
 - Create a task with ticker/date/model config.
 - Watch live progress logs in the task detail page.
 - Close/reopen your browser anytime; tasks continue in background and remain visible in the task list.
