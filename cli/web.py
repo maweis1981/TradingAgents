@@ -765,6 +765,56 @@ a { color:var(--accent); text-underline-offset: 2px; }
   border:1px solid var(--line); background:rgba(255,255,255,.06);
   color:var(--text); font-size:12px; font-weight:600;
 }
+.topbar {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  margin-bottom:12px;
+}
+.switcher {
+  display:inline-flex;
+  border:1px solid var(--line);
+  border-radius:999px;
+  background:rgba(255,255,255,.06);
+  overflow:hidden;
+}
+.switcher button {
+  background:transparent;
+  color:var(--text);
+  border:0;
+  border-radius:0;
+  padding:8px 12px;
+  font-size:12px;
+  font-weight:700;
+}
+.switcher button.active {
+  background:rgba(41,211,255,.22);
+  color:#dff7ff;
+}
+.sub {
+  color:var(--muted);
+  font-size:12px;
+  margin-top:-4px;
+}
+.hint-box {
+  border:1px dashed rgba(41,211,255,.45);
+  background:rgba(9, 37, 68, .5);
+  color:#b9d6ff;
+  border-radius:12px;
+  padding:10px 12px;
+  margin-top:10px;
+  font-size:13px;
+}
+.beginner-only { display:block; }
+.pro-only { display:none; }
+body[data-mode="pro"] .beginner-only { display:none !important; }
+body[data-mode="pro"] .pro-only { display:block !important; }
+.zh-en {
+  display:block;
+  font-size:12px;
+  color:#8fb0dc;
+}
 .grid { display:grid; gap:12px; grid-template-columns:repeat(2,minmax(0,1fr)); }
 .grid3 { display:grid; gap:12px; grid-template-columns:repeat(3,minmax(0,1fr)); }
 .kpi-grid { display:grid; gap:12px; grid-template-columns:repeat(4,minmax(0,1fr)); margin-bottom: 14px; }
@@ -878,6 +928,31 @@ def _render_ticker_tape() -> str:
     )
 
 
+def _ux_pref_script() -> str:
+    return """
+<script>
+(() => {
+  const modeKey = "ta_ui_mode";
+  const apply = (mode) => {
+    const v = mode === "pro" ? "pro" : "beginner";
+    document.body.setAttribute("data-mode", v);
+    for (const el of document.querySelectorAll("[data-mode-btn]")) {
+      el.classList.toggle("active", el.getAttribute("data-mode-btn") === v);
+    }
+  };
+  apply(localStorage.getItem(modeKey) || "beginner");
+  addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-mode-btn]");
+    if (!btn) return;
+    const m = btn.getAttribute("data-mode-btn");
+    localStorage.setItem(modeKey, m);
+    apply(m);
+  });
+})();
+</script>
+"""
+
+
 def _render_landing(user: dict | None = None, error: str = "") -> str:
     suggestions = _daily_suggestions()
     paid = False
@@ -920,23 +995,32 @@ def _render_landing(user: dict | None = None, error: str = "") -> str:
 <canvas id="bg3d" class="bg-canvas"></canvas>
 <div class="scan"></div>
 <main class="wrap">
+<div class="topbar">
+  <span class="pill">中文优先 · 新手友好 / Bloomberg 风专业界面</span>
+  <div class="switcher">
+    <button type="button" data-mode-btn="beginner">新手模式 Beginner</button>
+    <button type="button" data-mode-btn="pro">专业模式 Pro</button>
+  </div>
+</div>
 {_render_ticker_tape()}
 <section class="card hero">
   <span class="pill">AI Multi-Agent · Financial Intelligence</span>
-  <h1 style="margin-top:10px;">TradingAgents FinTech Advisory</h1>
-  <p>Institution-style multi-agent stock analysis, real-time task execution, and actionable trading decisions in one platform.</p>
+  <h1 style="margin-top:10px;">TradingAgents 智能投研终端 <span class="zh-en">Institutional AI Stock Advisory Terminal</span></h1>
+  <p>像交易台一样做研究，但保留中文用户与初级用户可理解的操作路径。</p>
+  <div class="hint-box beginner-only">新手提示：先看「今日建议」，再登录进入 Task Center 输入股票代码，系统会给出买入/卖出/不交易及原因。</div>
+  <div class="hint-box pro-only">Pro: Use Task Center for multi-agent pipeline analysis with full artifacts and risk-debate trail.</div>
   <div class="nav">{auth_html}</div>
 </section>
 <section class="grid">
   <div class="card">
-    <h2>What You Get</h2>
-    <p>Use Task Center for stock consultation and full report generation with live progress.</p>
-    <p>Daily public trade ideas are available to all users.</p>
+    <h2>你将获得什么 <span class="zh-en">What You Get</span></h2>
+    <p>通过 Task Center 获取股票咨询、实时进度、完整报告、PDF 与中英双语产物。</p>
+    <p>每日公开交易建议面向所有用户。</p>
   </div>
   <div class="card">
-    <h2>Subscription Model</h2>
-    <p>Plans define ticker capacity and daily query counts.</p>
-    <p>Paid users can unlock full rationale behind daily recommendations.</p>
+    <h2>订阅机制 <span class="zh-en">Subscription Model</span></h2>
+    <p>套餐决定可订阅股票数量与每日查询次数。</p>
+    <p>付费用户可查看每日建议的完整理由与深度报告。</p>
   </div>
 </section>
 {error_block}
@@ -944,6 +1028,7 @@ def _render_landing(user: dict | None = None, error: str = "") -> str:
 <section class="grid">{''.join(cards) if cards else '<div class="card">No suggestions today.</div>'}</section>
 </main>
 {_three_bg_script()}
+{_ux_pref_script()}
 </body></html>"""
 
 
@@ -953,13 +1038,15 @@ def _render_login(error: str = "") -> str:
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
 {_fintech_style()}</head>
-<body><div class="scan"></div><main class="wrap">{_render_ticker_tape()}<section class="card" style="max-width:520px;margin:40px auto;">
-<h2>Login</h2>{err}
+<body><div class="scan"></div><main class="wrap">
+<div class="topbar"><span class="pill">账户入口</span><div class="switcher"><button type="button" data-mode-btn="beginner">新手模式</button><button type="button" data-mode-btn="pro">专业模式</button></div></div>
+{_render_ticker_tape()}<section class="card" style="max-width:520px;margin:40px auto;">
+<h2>登录 <span class="zh-en">Login</span></h2>{err}
 <form method="post" action="/login">
-<p><label>Username <input name="username" required></label></p>
-<p><label>Password <input type="password" name="password" required></label></p>
-<p><button type="submit">Enter Task Center</button></p>
-</form><p><a href="/register">Register</a> | <a href="/">Home</a></p></section></main></body></html>"""
+<p><label>用户名 Username <input name="username" required></label></p>
+<p><label>密码 Password <input type="password" name="password" required></label></p>
+<p><button type="submit">进入任务中心 Enter Task Center</button></p>
+</form><p><a href="/register">Register</a> | <a href="/">Home</a></p></section></main>{_ux_pref_script()}</body></html>"""
 
 
 def _render_register(error: str = "") -> str:
@@ -968,13 +1055,15 @@ def _render_register(error: str = "") -> str:
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
 {_fintech_style()}</head>
-<body><div class="scan"></div><main class="wrap">{_render_ticker_tape()}<section class="card" style="max-width:520px;margin:40px auto;">
-<h2>Register</h2>{err}
+<body><div class="scan"></div><main class="wrap">
+<div class="topbar"><span class="pill">新用户注册</span><div class="switcher"><button type="button" data-mode-btn="beginner">新手模式</button><button type="button" data-mode-btn="pro">专业模式</button></div></div>
+{_render_ticker_tape()}<section class="card" style="max-width:520px;margin:40px auto;">
+<h2>注册 <span class="zh-en">Register</span></h2>{err}
 <form method="post" action="/register">
-<p><label>Username <input name="username" required></label></p>
-<p><label>Password <input type="password" name="password" required></label></p>
-<p><button type="submit">Create Account</button></p>
-</form><p><a href="/login">Login</a> | <a href="/">Home</a></p></section></main></body></html>"""
+<p><label>用户名 Username <input name="username" required></label></p>
+<p><label>密码 Password <input type="password" name="password" required></label></p>
+<p><button type="submit">创建账户 Create Account</button></p>
+</form><p><a href="/login">Login</a> | <a href="/">Home</a></p></section></main>{_ux_pref_script()}</body></html>"""
 
 
 def _render_pricing(user: dict | None = None, error: str = "") -> str:
@@ -996,7 +1085,8 @@ def _render_pricing(user: dict | None = None, error: str = "") -> str:
                 )
         cards.append(
             f"<div class='card'><h3>{_escape(p['name'])} (${p['price_usd']}/mo)</h3>"
-            f"<p>Tickers: {p['ticker_limit']}</p><p>Daily queries: {p['daily_query_limit']}</p>{btn}</div>"
+            f"<p>可订阅股票数 Tickers: {p['ticker_limit']}</p>"
+            f"<p>每日查询次数 Daily queries: {p['daily_query_limit']}</p>{btn}</div>"
         )
     err = f"<div class='card' style='border-color:#e9b2b2;color:#8a1c1c;'>{_escape(error)}</div>" if error else ""
     return f"""<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -1004,7 +1094,9 @@ def _render_pricing(user: dict | None = None, error: str = "") -> str:
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
 {_fintech_style()}</head>
-<body><div class="scan"></div><main class="wrap">{_render_ticker_tape()}<section class="card hero"><h2>Pricing</h2><p><a href="/">Home</a> | <a href="/task-center">Task Center</a></p></section>{err}<section class="grid3">{''.join(cards)}</section></main></body></html>"""
+<body><div class="scan"></div><main class="wrap">
+<div class="topbar"><span class="pill">订阅与额度</span><div class="switcher"><button type="button" data-mode-btn="beginner">新手模式</button><button type="button" data-mode-btn="pro">专业模式</button></div></div>
+{_render_ticker_tape()}<section class="card hero"><h2>订阅套餐 <span class="zh-en">Pricing</span></h2><p><a href="/">Home</a> | <a href="/task-center">Task Center</a></p></section>{err}<section class="grid3">{''.join(cards)}</section></main>{_ux_pref_script()}</body></html>"""
 
 
 def _render_dashboard(user: dict, error: str = "") -> str:
@@ -1076,13 +1168,20 @@ def _render_dashboard(user: dict, error: str = "") -> str:
     <canvas id="bg3d" class="bg-canvas"></canvas>
     <div class="scan"></div>
     <main class="wrap">
+      <div class="topbar">
+        <span class="pill">任务中心 · Task Center</span>
+        <div class="switcher">
+          <button type="button" data-mode-btn="beginner">新手模式</button>
+          <button type="button" data-mode-btn="pro">专业模式</button>
+        </div>
+      </div>
       {_render_ticker_tape()}
-      <h1>TradingAgents Task Center</h1>
+      <h1>交易任务中心 <span class="zh-en">TradingAgents Task Center</span></h1>
       <section class="kpi-grid">
-        <div class="kpi-card"><div class="kpi-title">Plan</div><div class="kpi-value">{_escape(stats['plan']['name'])}</div></div>
-        <div class="kpi-card"><div class="kpi-title">Queries Left</div><div class="kpi-value">{stats['remaining_queries']}</div></div>
-        <div class="kpi-card"><div class="kpi-title">Tickers Left</div><div class="kpi-value">{stats['remaining_tickers']}</div></div>
-        <div class="kpi-card"><div class="kpi-title">Today Usage</div><div class="kpi-value">{stats['used_queries']}</div></div>
+        <div class="kpi-card"><div class="kpi-title">套餐 Plan</div><div class="kpi-value">{_escape(stats['plan']['name'])}</div></div>
+        <div class="kpi-card"><div class="kpi-title">剩余查询 Queries Left</div><div class="kpi-value">{stats['remaining_queries']}</div></div>
+        <div class="kpi-card"><div class="kpi-title">剩余股票 Tickers Left</div><div class="kpi-value">{stats['remaining_tickers']}</div></div>
+        <div class="kpi-card"><div class="kpi-title">今日已用 Today Usage</div><div class="kpi-value">{stats['used_queries']}</div></div>
       </section>
       <section class="card">
         <p class="kpi"><strong>User:</strong> {_escape(user['username'])}</p>
@@ -1090,6 +1189,8 @@ def _render_dashboard(user: dict, error: str = "") -> str:
         <p class="kpi"><strong>Daily Queries:</strong> {stats['used_queries']} / {stats['plan']['daily_query_limit']}</p>
         <p class="kpi"><strong>Subscribed Tickers:</strong> {stats['ticker_count']} / {stats['plan']['ticker_limit']}</p>
         <p style="margin:0;"><a href="/">Home</a> | <a href="/pricing">Pricing</a> | <a href="/logout">Logout</a></p>
+        <div class="hint-box beginner-only">新手提示：先输入股票代码和日期，保持默认参数直接运行即可。结果页会给出「买入/卖出/不交易」。</div>
+        <div class="hint-box pro-only">Pro: Tune provider/model/debate rounds for latency-cost-quality balance; monitor streaming events for node-level progress.</div>
       </section>
       <section class="card">
         <h2>New Task</h2>
@@ -1146,6 +1247,7 @@ def _render_dashboard(user: dict, error: str = "") -> str:
       {task_table}
     </main>
     {_three_bg_script()}
+    {_ux_pref_script()}
   </body>
 </html>"""
 
@@ -1206,6 +1308,13 @@ def _render_task_page(task_id: str) -> str:
     <canvas id="bg3d" class="bg-canvas"></canvas>
     <div class="scan"></div>
     <main class="wrap">
+      <div class="topbar">
+        <span class="pill">任务详情 · Live Execution</span>
+        <div class="switcher">
+          <button type="button" data-mode-btn="beginner">新手模式</button>
+          <button type="button" data-mode-btn="pro">专业模式</button>
+        </div>
+      </div>
       {_render_ticker_tape()}
       <div class="card">
         <a href="/task-center">Back to Tasks</a>
@@ -1287,6 +1396,7 @@ def _render_task_page(task_id: str) -> str:
       poll();
     </script>
     {_three_bg_script()}
+    {_ux_pref_script()}
   </body>
 </html>"""
 
