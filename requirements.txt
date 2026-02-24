@@ -18,5 +18,6 @@ chainlit
 rich
 typer
 questionary
+python-dotenv
 langchain_anthropic
 langchain-google-genai

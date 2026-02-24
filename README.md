@@ -141,17 +141,21 @@ cp .env.example .env
 
 ### Web UI Usage
 
-You can start a simple local web interface:
+You can start an async task-based local web interface:
 
 ```bash
 python -m cli.web
 ```
 
-Then open `http://127.0.0.1:8088` in your browser, fill in ticker/date/model config, and run the analysis.
+Then open `http://127.0.0.1:8088` in your browser:
+- Create a task with ticker/date/model config.
+- Watch live progress logs in the task detail page.
+- Close/reopen your browser anytime; tasks continue in background and remain visible in the task list.
 
 Optional env vars:
 - `TRADINGAGENTS_WEB_HOST` (default: `127.0.0.1`)
 - `TRADINGAGENTS_WEB_PORT` (default: `8088`)
+- `TRADINGAGENTS_WEB_TASKS_DIR` (default: `./results/web_tasks`)
 
 You can also try out the CLI directly by running:
 ```bash
