@@ -1,6 +1,7 @@
 import argparse
 import json
 import re
+import sys
 import threading
 import textwrap
 import time
@@ -89,6 +90,37 @@ def _message_to_text(message_obj) -> str:
     if isinstance(content, list):
         return str(content)
     return str(content)
+
+
+class _EventTeeIO:
+    def __init__(self, task_dir: Path, event_type: str, stream):
+        self.task_dir = task_dir
+        self.event_type = event_type
+        self.stream = stream
+        self._buf = ""
+
+    def write(self, s):
+        text = str(s)
+        try:
+            self.stream.write(text)
+        except Exception:
+            pass
+        self._buf += text
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            line = line.rstrip("\r")
+            if line.strip():
+                append_event(self.task_dir, self.event_type, line)
+        return len(text)
+
+    def flush(self):
+        try:
+            self.stream.flush()
+        except Exception:
+            pass
+        if self._buf.strip():
+            append_event(self.task_dir, self.event_type, self._buf.rstrip("\r"))
+        self._buf = ""
 
 
 def _safe_filename(name: str) -> str:
@@ -265,7 +297,7 @@ def run_task(task_dir: Path) -> None:
             if messages:
                 text = _message_to_text(messages[-1]).strip()
                 if text:
-                    append_event(task_dir, "message", text[:4000])
+                    append_event(task_dir, "message", text)
 
             for field in REPORT_FIELDS:
                 if field in chunk and chunk.get(field):
@@ -276,7 +308,7 @@ def run_task(task_dir: Path) -> None:
                             task_dir,
                             "report",
                             f"{field} updated",
-                            {"field": field, "content": value[:12000]},
+                            {"field": field, "content": value},
                         )
     finally:
         heartbeat_stop.set()
@@ -357,6 +389,11 @@ def main() -> None:
     task_dir = Path(args.task_dir).resolve()
     task_dir.mkdir(parents=True, exist_ok=True)
 
+    orig_stdout = sys.stdout
+    orig_stderr = sys.stderr
+    sys.stdout = _EventTeeIO(task_dir, "stdout", sys.__stdout__)
+    sys.stderr = _EventTeeIO(task_dir, "stderr", sys.__stderr__)
+
     try:
         run_task(task_dir)
     except Exception:
@@ -394,6 +431,17 @@ def main() -> None:
                 last_error=err.splitlines()[-1] if err else "unknown error",
                 next_retry_at=None,
             )
+    finally:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        sys.stdout = orig_stdout
+        sys.stderr = orig_stderr
 
 
 if __name__ == "__main__":

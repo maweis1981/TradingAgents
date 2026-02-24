@@ -592,6 +592,9 @@ def _render_task_page(task_id: str) -> str:
         const ts = ev.ts || "";
         const typ = ev.type || "event";
         const msg = ev.message || "";
+        if (typ === "stdout" || typ === "stderr") {{
+          return msg;
+        }}
         return `[${{ts}}] ${{typ}} | ${{msg}}`;
       }}
 
