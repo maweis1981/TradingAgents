@@ -16,8 +16,39 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
+stop_pid_if_running() {
+  local pid="$1"
+  if [ -n "$pid" ] && ps -p "$pid" >/dev/null 2>&1; then
+    echo "[INFO] Stopping existing service process PID=$pid"
+    kill "$pid" || true
+    sleep 1
+    if ps -p "$pid" >/dev/null 2>&1; then
+      echo "[WARN] PID $pid still alive, sending SIGKILL"
+      kill -9 "$pid" || true
+    fi
+  fi
+}
+
+# 1) Stop by PID file if present
+if [ -f "$PID_FILE" ]; then
+  OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
+  stop_pid_if_running "$OLD_PID"
+  rm -f "$PID_FILE"
+fi
+
+# 2) Stop anything else already listening on target port
+EXISTING_PIDS="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN -n -P 2>/dev/null || true)"
+if [ -n "$EXISTING_PIDS" ]; then
+  echo "[INFO] Stopping existing process(es) on port $PORT: $EXISTING_PIDS"
+  for p in $EXISTING_PIDS; do
+    kill "$p" || true
+  done
+  sleep 1
+fi
+
+# Double-check port availability
 if lsof -iTCP:"$PORT" -sTCP:LISTEN -n -P >/dev/null 2>&1; then
-  echo "[ERROR] Port $PORT is already in use." >&2
+  echo "[ERROR] Port $PORT is still in use after stop attempts." >&2
   lsof -iTCP:"$PORT" -sTCP:LISTEN -n -P || true
   exit 1
 fi
@@ -44,4 +75,4 @@ echo "  URL:  http://$HOST:$PORT"
 echo "  LOG:  $LOG_FILE"
 echo "  PIDF: $PID_FILE"
 echo
-echo "Health check: curl -I http://$HOST:$PORT"
+echo "Health check: curl -sS -o /dev/null -w 'http_code=%{http_code}\n' http://$HOST:$PORT"
