@@ -1,6 +1,8 @@
 import argparse
 import json
+import re
 import threading
+import textwrap
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
@@ -25,6 +27,15 @@ REPORT_FIELDS = [
     "trader_investment_plan",
     "final_trade_decision",
 ]
+REPORT_TITLES = {
+    "market_report": "Market Report",
+    "sentiment_report": "Sentiment Report",
+    "news_report": "News Report",
+    "fundamentals_report": "Fundamentals Report",
+    "investment_plan": "Investment Plan",
+    "trader_investment_plan": "Trader Investment Plan",
+    "final_trade_decision": "Final Trade Decision",
+}
 
 
 def now_iso() -> str:
@@ -78,6 +89,118 @@ def _message_to_text(message_obj) -> str:
     if isinstance(content, list):
         return str(content)
     return str(content)
+
+
+def _safe_filename(name: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]+", "_", name).strip("_").lower()
+
+
+def _collect_markdown_docs(final_state: dict, decision: str) -> dict[str, str]:
+    docs: dict[str, str] = {}
+    for field in REPORT_FIELDS:
+        value = final_state.get(field)
+        if value:
+            docs[field] = str(value)
+    docs["result_summary"] = (
+        f"# Result Summary\n\n"
+        f"- Decision: `{decision}`\n"
+        f"- Ticker: `{final_state.get('company_of_interest', '')}`\n"
+        f"- Trade Date: `{final_state.get('trade_date', '')}`\n"
+    )
+    return docs
+
+
+def _write_markdown_bundle(root: Path, docs: dict[str, str]) -> list[str]:
+    root.mkdir(parents=True, exist_ok=True)
+    out = []
+    for idx, (key, text) in enumerate(docs.items(), start=1):
+        title = REPORT_TITLES.get(key, key.replace("_", " ").title())
+        name = f"{idx:02d}_{_safe_filename(key)}.md"
+        p = root / name
+        p.write_text(f"# {title}\n\n{text}\n", encoding="utf-8")
+        out.append(str(p))
+    return out
+
+
+def _markdown_to_plain_text(md: str) -> str:
+    text = md.replace("\r\n", "\n")
+    text = re.sub(r"```.*?```", "", text, flags=re.S)
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.M)
+    text = re.sub(r"^\s*[-*+]\s+", "• ", text, flags=re.M)
+    text = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1 (\2)", text)
+    return text.strip()
+
+
+def _write_pdf(text: str, pdf_path: Path, chinese: bool = False) -> None:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfgen import canvas
+
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+
+    c = canvas.Canvas(str(pdf_path), pagesize=A4)
+    width, height = A4
+    margin_x = 40
+    margin_y = 40
+    y = height - margin_y
+
+    if chinese:
+        font_name = "STSong-Light"
+        try:
+            pdfmetrics.getFont(font_name)
+        except Exception:
+            pdfmetrics.registerFont(UnicodeCIDFont(font_name))
+        c.setFont(font_name, 10)
+        wrap_width = 46
+    else:
+        font_name = "Helvetica"
+        c.setFont(font_name, 10)
+        wrap_width = 95
+
+    lines = []
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line:
+            lines.append("")
+            continue
+        wrapped = textwrap.wrap(line, width=wrap_width, break_long_words=True, break_on_hyphens=False)
+        lines.extend(wrapped if wrapped else [""])
+
+    for line in lines:
+        if y < margin_y:
+            c.showPage()
+            c.setFont(font_name, 10)
+            y = height - margin_y
+        c.drawString(margin_x, y, line)
+        y -= 14
+
+    c.save()
+
+
+def _translate_to_zh(task: dict, markdown: str) -> str:
+    from tradingagents.llm_clients import create_llm_client
+
+    provider = task["provider"]
+    model = task["quick_model"]
+    client = create_llm_client(
+        provider=provider,
+        model=model,
+        base_url=DEFAULT_CONFIG.get("backend_url"),
+    )
+    llm = client.get_llm()
+    prompt = (
+        "Translate the following markdown content into Simplified Chinese. "
+        "Keep markdown structure, headings, bullet points, code blocks, and tables unchanged in format. "
+        "Only translate natural language text.\n\n"
+        f"{markdown}"
+    )
+    resp = llm.invoke(prompt)
+    text = _message_to_text(resp).strip()
+    if not text:
+        raise RuntimeError("Empty translation result")
+    return text
 
 
 def run_task(task_dir: Path) -> None:
@@ -170,6 +293,57 @@ def run_task(task_dir: Path) -> None:
         "ticker": ticker,
     }
 
+    docs_en = _collect_markdown_docs(final_state, decision)
+    artifacts = {
+        "reports_en": [],
+        "reports_zh": [],
+        "pdf_en": [],
+        "pdf_zh": [],
+    }
+
+    append_event(task_dir, "phase", "Exporting English markdown reports")
+    en_files = _write_markdown_bundle(task_dir / "reports_en", docs_en)
+    artifacts["reports_en"] = [str(Path(p).relative_to(task_dir)) for p in en_files]
+
+    if task.get("export_pdf", True):
+        append_event(task_dir, "phase", "Converting English markdown reports to PDF")
+        for md_path in en_files:
+            md_file = Path(md_path)
+            text = _markdown_to_plain_text(md_file.read_text(encoding="utf-8"))
+            pdf_path = task_dir / "pdf_en" / f"{md_file.stem}.pdf"
+            try:
+                _write_pdf(text, pdf_path, chinese=False)
+                artifacts["pdf_en"].append(str(pdf_path.relative_to(task_dir)))
+            except Exception as pdf_err:
+                append_event(task_dir, "pdf_error", f"{md_file.name} PDF export failed", {"error": str(pdf_err)})
+
+    if task.get("translate_to_zh", True):
+        append_event(task_dir, "phase", "Translating reports to Chinese")
+        docs_zh: dict[str, str] = {}
+        for key, text in docs_en.items():
+            try:
+                docs_zh[key] = _translate_to_zh(task, text)
+                append_event(task_dir, "translation", f"{key} translated to Chinese")
+            except Exception as trans_err:
+                append_event(task_dir, "translation_error", f"{key} translation failed", {"error": str(trans_err)})
+                docs_zh[key] = text
+
+        zh_files = _write_markdown_bundle(task_dir / "reports_zh", docs_zh)
+        artifacts["reports_zh"] = [str(Path(p).relative_to(task_dir)) for p in zh_files]
+
+        if task.get("export_pdf", True):
+            append_event(task_dir, "phase", "Converting Chinese markdown reports to PDF")
+            for md_path in zh_files:
+                md_file = Path(md_path)
+                text = _markdown_to_plain_text(md_file.read_text(encoding="utf-8"))
+                pdf_path = task_dir / "pdf_zh" / f"{md_file.stem}.pdf"
+                try:
+                    _write_pdf(text, pdf_path, chinese=True)
+                    artifacts["pdf_zh"].append(str(pdf_path.relative_to(task_dir)))
+                except Exception as pdf_err:
+                    append_event(task_dir, "pdf_error", f"{md_file.name} PDF export failed", {"error": str(pdf_err)})
+
+    result["artifacts"] = artifacts
     write_json(task_dir / "result.json", result)
     append_event(task_dir, "completed", f"Task completed with decision: {decision}")
     update_status(task_dir, status="completed", pid=None, next_retry_at=None, last_error=None)

@@ -309,6 +309,8 @@ def _validate_form(form: dict) -> dict:
         raise ValueError("max_retries must be between 0 and 10")
     if retry_delay_seconds < 0 or retry_delay_seconds > 3600:
         raise ValueError("retry_delay_seconds must be between 0 and 3600")
+    export_pdf = form.get("export_pdf", "on") == "on"
+    translate_to_zh = form.get("translate_to_zh", "on") == "on"
 
     deep_model = (form.get("deep_model") or DEFAULT_CONFIG["deep_think_llm"]).strip()
     quick_model = (form.get("quick_model") or DEFAULT_CONFIG["quick_think_llm"]).strip()
@@ -332,6 +334,8 @@ def _validate_form(form: dict) -> dict:
         "analysts": analysts,
         "max_retries": max_retries,
         "retry_delay_seconds": retry_delay_seconds,
+        "export_pdf": export_pdf,
+        "translate_to_zh": translate_to_zh,
     }
 
 
@@ -492,6 +496,13 @@ def _render_dashboard(error: str = "") -> str:
             <label>Analysts</label>
             <div class="checks">{analyst_checks}</div>
           </div>
+          <div style="margin-top:10px;">
+            <label>Output Options</label>
+            <div class="checks">
+              <label><input type="checkbox" name="translate_to_zh" checked /> Translate to Chinese</label>
+              <label><input type="checkbox" name="export_pdf" checked /> Export PDF</label>
+            </div>
+          </div>
           <div style="margin-top:14px;"><button type="submit">Create Task</button></div>
         </form>
       </section>
@@ -513,12 +524,25 @@ def _render_task_page(task_id: str) -> str:
 
     result_html = ""
     if result:
+        artifacts = result.get("artifacts") or {}
+        artifact_lines = []
+        for group, paths in artifacts.items():
+            if not paths:
+                continue
+            for p in paths:
+                artifact_lines.append(f"{group}: {p}")
+        artifacts_block = ""
+        if artifact_lines:
+            artifacts_block = (
+                "<h3>Artifacts</h3><pre>" + _escape("\n".join(artifact_lines)) + "</pre>"
+            )
         result_html = f"""
         <section class=\"card\">
           <h2>Result</h2>
           <p><strong>Processed Decision:</strong> {_escape(result.get('decision', ''))}</p>
           <h3>Final Trade Decision</h3>
           <pre>{_escape(result.get('final_trade_decision', ''))}</pre>
+          {artifacts_block}
         </section>
         """
 

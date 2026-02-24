@@ -151,6 +151,7 @@ Then open `http://127.0.0.1:8088` in your browser:
 - Create a task with ticker/date/model config.
 - Watch live progress logs in the task detail page.
 - Close/reopen your browser anytime; tasks continue in background and remain visible in the task list.
+- On completion, task outputs include English markdown reports, Chinese translations, and optional PDF exports.
 
 Optional env vars:
 - `TRADINGAGENTS_WEB_HOST` (default: `127.0.0.1`)
