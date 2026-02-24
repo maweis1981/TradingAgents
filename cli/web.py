@@ -609,9 +609,9 @@ def _render_task_page(task_id: str) -> str:
             }}
             for (const ev of evData.events || []) {{
               const text = lineForEvent(ev);
-              log.textContent += (log.textContent ? "\n" : "") + text;
+              log.textContent += (log.textContent ? "\\n" : "") + text;
               if (ev.data && ev.data.content) {{
-                log.textContent += "\n" + ev.data.content + "\n";
+                log.textContent += "\\n" + ev.data.content + "\\n";
               }}
             }}
             offset = evData.next_offset || offset;
