@@ -1,5 +1,7 @@
 import argparse
 import json
+import threading
+import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -79,8 +81,6 @@ def _message_to_text(message_obj) -> str:
 
 
 def run_task(task_dir: Path) -> None:
-    from tradingagents.graph.trading_graph import TradingAgentsGraph
-
     task = read_json(task_dir / "task.json", default={})
     if not task:
         raise RuntimeError("task.json missing or invalid")
@@ -107,35 +107,56 @@ def run_task(task_dir: Path) -> None:
     )
     update_status(task_dir, status="running", attempt=attempt)
 
+    # Heartbeat so UI always has live progress even when upstream calls are slow.
+    heartbeat_stop = threading.Event()
+    started = time.time()
+
+    def heartbeat() -> None:
+        while not heartbeat_stop.wait(5):
+            elapsed = int(time.time() - started)
+            append_event(task_dir, "heartbeat", f"Task running... {elapsed}s elapsed")
+
+    hb_thread = threading.Thread(target=heartbeat, daemon=True)
+    hb_thread.start()
+
+    append_event(task_dir, "phase", "Loading TradingAgents graph")
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+    append_event(task_dir, "phase", "Initializing graph instance")
     ta = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
+    append_event(task_dir, "phase", "Building initial state")
     init_state = ta.propagator.create_initial_state(ticker, trade_date)
     graph_args = ta.propagator.get_graph_args()
+    append_event(task_dir, "phase", "Starting graph stream")
 
     final_state = None
     last_reports = {}
 
-    for idx, chunk in enumerate(ta.graph.stream(init_state, **graph_args), start=1):
-        final_state = chunk
-        keys = sorted(chunk.keys())
-        append_event(task_dir, "chunk", f"Chunk {idx}: {', '.join(keys)}")
+    try:
+        for idx, chunk in enumerate(ta.graph.stream(init_state, **graph_args), start=1):
+            final_state = chunk
+            keys = sorted(chunk.keys())
+            append_event(task_dir, "chunk", f"Chunk {idx}: {', '.join(keys)}")
 
-        messages = chunk.get("messages") or []
-        if messages:
-            text = _message_to_text(messages[-1]).strip()
-            if text:
-                append_event(task_dir, "message", text[:4000])
+            messages = chunk.get("messages") or []
+            if messages:
+                text = _message_to_text(messages[-1]).strip()
+                if text:
+                    append_event(task_dir, "message", text[:4000])
 
-        for field in REPORT_FIELDS:
-            if field in chunk and chunk.get(field):
-                value = str(chunk[field])
-                if last_reports.get(field) != value:
-                    last_reports[field] = value
-                    append_event(
-                        task_dir,
-                        "report",
-                        f"{field} updated",
-                        {"field": field, "content": value[:12000]},
-                    )
+            for field in REPORT_FIELDS:
+                if field in chunk and chunk.get(field):
+                    value = str(chunk[field])
+                    if last_reports.get(field) != value:
+                        last_reports[field] = value
+                        append_event(
+                            task_dir,
+                            "report",
+                            f"{field} updated",
+                            {"field": field, "content": value[:12000]},
+                        )
+    finally:
+        heartbeat_stop.set()
 
     if final_state is None:
         raise RuntimeError("No graph output produced")

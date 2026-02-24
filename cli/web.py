@@ -555,7 +555,7 @@ def _render_task_page(task_id: str) -> str:
       </div>
       <section class="card">
         <h3>Live Progress</h3>
-        <pre id="log"></pre>
+        <pre id="log">Waiting for task events...</pre>
       </section>
       {result_html}
     </main>
@@ -577,6 +577,9 @@ def _render_task_page(task_id: str) -> str:
           if (evResp.ok) {{
             const evData = await evResp.json();
             const log = document.getElementById("log");
+            if ((evData.events || []).length > 0 && log.textContent === "Waiting for task events...") {{
+              log.textContent = "";
+            }}
             for (const ev of evData.events || []) {{
               const text = lineForEvent(ev);
               log.textContent += (log.textContent ? "\n" : "") + text;
