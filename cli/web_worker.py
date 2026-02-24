@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import re
 import sys
 import threading
@@ -168,6 +169,7 @@ def _write_pdf(text: str, pdf_path: Path, chinese: bool = False) -> None:
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.pdfgen import canvas
 
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,18 +180,36 @@ def _write_pdf(text: str, pdf_path: Path, chinese: bool = False) -> None:
     margin_y = 40
     y = height - margin_y
 
+    font_name = "Helvetica"
+    wrap_width = 95
     if chinese:
-        font_name = "STSong-Light"
-        try:
-            pdfmetrics.getFont(font_name)
-        except Exception:
-            pdfmetrics.registerFont(UnicodeCIDFont(font_name))
-        c.setFont(font_name, 10)
+        # Prefer real CJK fonts on host system. Fallback to CID font.
+        cjk_candidates = [
+            ("/System/Library/Fonts/PingFang.ttc", 0),
+            ("/System/Library/Fonts/Hiragino Sans GB.ttc", 0),
+            ("/System/Library/Fonts/Supplemental/Songti.ttc", 0),
+            ("/Library/Fonts/Arial Unicode.ttf", 0),
+            ("/System/Library/Fonts/STHeiti Light.ttc", 0),
+        ]
+        for idx, (font_path, sub_idx) in enumerate(cjk_candidates, start=1):
+            if not os.path.exists(font_path):
+                continue
+            candidate_name = f"TA_CJK_{idx}"
+            try:
+                pdfmetrics.registerFont(TTFont(candidate_name, font_path, subfontIndex=sub_idx))
+                font_name = candidate_name
+                break
+            except Exception:
+                continue
+        if font_name == "Helvetica":
+            font_name = "STSong-Light"
+            try:
+                pdfmetrics.getFont(font_name)
+            except Exception:
+                pdfmetrics.registerFont(UnicodeCIDFont(font_name))
         wrap_width = 46
-    else:
-        font_name = "Helvetica"
-        c.setFont(font_name, 10)
-        wrap_width = 95
+
+    c.setFont(font_name, 10)
 
     lines = []
     for raw in text.splitlines():
@@ -209,6 +229,29 @@ def _write_pdf(text: str, pdf_path: Path, chinese: bool = False) -> None:
         y -= 14
 
     c.save()
+
+
+def _normalize_decision(raw_decision: str) -> str:
+    text = (raw_decision or "").strip().upper()
+    if "SELL" in text:
+        return "SELL"
+    if "BUY" in text:
+        return "BUY"
+    if "HOLD" in text:
+        return "HOLD"
+    return "HOLD"
+
+
+def _operation_from_decision(decision: str, final_text: str) -> str:
+    decision = (decision or "").upper()
+    full = (final_text or "").upper()
+    if "NO TRADE" in full or "NO_TRADE" in full or "DO NOT TRADE" in full:
+        return "NO_TRADE"
+    if decision == "BUY":
+        return "BUY"
+    if decision == "SELL":
+        return "SELL"
+    return "NO_TRADE"
 
 
 def _translate_to_zh(task: dict, markdown: str) -> str:
@@ -316,9 +359,18 @@ def run_task(task_dir: Path) -> None:
     if final_state is None:
         raise RuntimeError("No graph output produced")
 
-    decision = ta.process_signal(final_state.get("final_trade_decision", ""))
+    raw_decision = ta.process_signal(final_state.get("final_trade_decision", ""))
+    decision = _normalize_decision(raw_decision)
+    operation_decision = _operation_from_decision(decision, final_state.get("final_trade_decision", ""))
     result = {
         "decision": decision,
+        "operation_decision": operation_decision,
+        "operation_text_zh": (
+            "买入" if operation_decision == "BUY" else
+            "卖出" if operation_decision == "SELL" else
+            "不交易"
+        ),
+        "decision_raw": raw_decision,
         "final_trade_decision": final_state.get("final_trade_decision", ""),
         "investment_plan": final_state.get("investment_plan", ""),
         "trade_date": trade_date,
@@ -377,7 +429,7 @@ def run_task(task_dir: Path) -> None:
 
     result["artifacts"] = artifacts
     write_json(task_dir / "result.json", result)
-    append_event(task_dir, "completed", f"Task completed with decision: {decision}")
+    append_event(task_dir, "completed", f"Task completed with decision: {decision}, operation: {operation_decision}")
     update_status(task_dir, status="completed", pid=None, next_retry_at=None, last_error=None)
 
 

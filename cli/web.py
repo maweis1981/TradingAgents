@@ -9,8 +9,9 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import mimetypes
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 try:
     from dotenv import load_dotenv
@@ -525,21 +526,29 @@ def _render_task_page(task_id: str) -> str:
     result_html = ""
     if result:
         artifacts = result.get("artifacts") or {}
-        artifact_lines = []
-        for group, paths in artifacts.items():
-            if not paths:
+        artifact_rows = []
+        for group, files in artifacts.items():
+            if not files:
                 continue
-            for p in paths:
-                artifact_lines.append(f"{group}: {p}")
-        artifacts_block = ""
-        if artifact_lines:
-            artifacts_block = (
-                "<h3>Artifacts</h3><pre>" + _escape("\n".join(artifact_lines)) + "</pre>"
-            )
+            for rel in files:
+                rel_q = quote(rel)
+                open_url = f"/api/tasks/{quote(task_id)}/artifact?path={rel_q}"
+                download_url = f"/api/tasks/{quote(task_id)}/artifact?path={rel_q}&download=1"
+                artifact_rows.append(
+                    f"<tr><td>{_escape(group)}</td><td>{_escape(rel)}</td>"
+                    f"<td><a href=\"{_escape(open_url)}\" target=\"_blank\">Open</a> | "
+                    f"<a href=\"{_escape(download_url)}\">Download</a></td></tr>"
+                )
+        artifacts_block = (
+            "<h3>Artifacts</h3>"
+            "<div class=\"table-wrap\"><table><thead><tr><th>Group</th><th>File</th><th>Action</th></tr></thead>"
+            f"<tbody>{''.join(artifact_rows) if artifact_rows else '<tr><td colspan=\"3\">None</td></tr>'}</tbody></table></div>"
+        )
         result_html = f"""
         <section class=\"card\">
           <h2>Result</h2>
           <p><strong>Processed Decision:</strong> {_escape(result.get('decision', ''))}</p>
+          <p><strong>Operation Decision:</strong> {_escape(result.get('operation_decision', ''))} ({_escape(result.get('operation_text_zh', ''))})</p>
           <h3>Final Trade Decision</h3>
           <pre>{_escape(result.get('final_trade_decision', ''))}</pre>
           {artifacts_block}
@@ -560,6 +569,9 @@ def _render_task_page(task_id: str) -> str:
       .card {{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }}
       pre {{ background:#0b1220; color:#d2e4ff; border-radius:10px; padding:12px; min-height:280px; white-space:pre-wrap; word-break:break-word; overflow:auto; }}
       .meta p {{ margin:5px 0; font-size:14px; }}
+      .table-wrap {{ overflow:auto; }}
+      table {{ border-collapse: collapse; width:100%; min-width:680px; }}
+      th, td {{ border-bottom:1px solid #e8edf2; text-align:left; padding:8px 6px; font-size:13px; }}
       a {{ color:#0b6bcb; }}
     </style>
   </head>
@@ -670,6 +682,20 @@ class TradingAgentsWebHandler(BaseHTTPRequestHandler):
         self.send_header("Location", location)
         self.end_headers()
 
+    def _send_file(self, file_path: Path, download: bool = False) -> None:
+        if not file_path.exists() or not file_path.is_file():
+            self._send_html("<h1>File Not Found</h1>", status=HTTPStatus.NOT_FOUND)
+            return
+        data = file_path.read_bytes()
+        content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        disposition = "attachment" if download else "inline"
+        self.send_header("Content-Disposition", f'{disposition}; filename="{file_path.name}"')
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
@@ -714,6 +740,22 @@ class TradingAgentsWebHandler(BaseHTTPRequestHandler):
                     offset = 0
                 events, next_offset = _read_events(paths["dir"], max(offset, 0))
                 self._send_json({"task_id": task_id, "events": events, "next_offset": next_offset})
+                return
+
+            if len(segments) == 4 and segments[3] == "artifact":
+                q = parse_qs(parsed.query)
+                rel_path = (q.get("path") or [""])[0]
+                download = (q.get("download") or ["0"])[0] == "1"
+                if not rel_path:
+                    self._send_json({"error": "path is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                candidate = (paths["dir"] / rel_path).resolve()
+                try:
+                    candidate.relative_to(paths["dir"].resolve())
+                except Exception:
+                    self._send_json({"error": "invalid path"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                self._send_file(candidate, download=download)
                 return
 
         self._send_html("<h1>Not Found</h1>", status=HTTPStatus.NOT_FOUND)
